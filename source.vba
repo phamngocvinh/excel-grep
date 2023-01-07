@@ -1,18 +1,21 @@
 ' Global variables
 Dim resultCount, resultCell, cellChk, commChk, shapeChk, fileCount, processCount As Integer
 Dim statusbarStr As String
+Dim searchArr(1 To 10) As Variant
+Dim isCaseSensitive As Boolean
 
 ' Constant
 Const folderCell As String = "C2"
-Const excludeCell As String = "C8"
+Const excludeCell As String = "C9"
 Const headerFirstCell As String = "B2"
-Const headerRowCell As String = "B2:E2"
-Const headerColCell As String = "B:E"
-Const headerCellCell As String = "B2"
-Const headerValueCell As String = "C2"
-Const headerSheetCell As String = "D2"
-Const headerFileCell As String = "E2"
-Const searchStrCell As String = "C10"
+Const headerRowCell As String = "B2:F2"
+Const headerColCell As String = "B:F"
+Const headerNoCell As String = "B2"
+Const headerCellCell As String = "C2"
+Const headerValueCell As String = "D2"
+Const headerSheetCell As String = "E2"
+Const headerFileCell As String = "F2"
+Const searchStrCol As String = "C"
 
 ' Browse button click
 Sub browse_Click()
@@ -46,11 +49,24 @@ Sub grep_Click()
     processCount = 0
     resultCount = 0
     resultCell = 2
+    
+    ' Check folder exists
+    If Dir(Range(folderCell).value, vbDirectory) = "" Then
+        MsgBox ("Path not found")
+        Exit Sub
+    End If
+    
+    ' Check search string
+    If Not InitSearchArray() Then
+        MsgBox ("Search condition is empty")
+        Exit Sub
+    End If
 
     ' Get option checkbox value
-    cellChk = ThisWorkbook.Worksheets(1).Shapes("Check Box 3").OLEFormat.Object.value
-    commChk = ThisWorkbook.Worksheets(1).Shapes("Check Box 4").OLEFormat.Object.value
-    shapeChk = ThisWorkbook.Worksheets(1).Shapes("Check Box 5").OLEFormat.Object.value
+    cellChk = ThisWorkbook.Worksheets(1).Shapes("chkCell").OLEFormat.Object.value
+    commChk = ThisWorkbook.Worksheets(1).Shapes("chkComment").OLEFormat.Object.value
+    shapeChk = ThisWorkbook.Worksheets(1).Shapes("chkShape").OLEFormat.Object.value
+    isCaseSensitive = ThisWorkbook.Worksheets(1).Shapes("chkCase").OLEFormat.Object.value = 1
     
     ' Create Result sheet
     Call CreateResultSheet
@@ -74,7 +90,7 @@ Sub grep_Click()
         Call AddBorder
         
         ' Scroll to first cell
-        Application.GoTo Reference:=Range("A1"), Scroll:=True
+        Application.Goto Reference:=Range("A1"), Scroll:=True
     Else
         MsgBox ("Not found!")
     End If
@@ -88,9 +104,7 @@ Function DoFolder(Folder)
     
     Dim wb As Workbook
     Dim ws As Worksheet
-    
-    Dim searchString, excludeArr
-    searchString = Range(searchStrCell).value
+    Dim excludeArr
     
     ' Get excluded file
     excludeArr = Split(Range(excludeCell).value, ",")
@@ -104,11 +118,6 @@ Function DoFolder(Folder)
     
     Dim file
     For Each file In Folder.Files
-        ' Update status bar
-        processCount = processCount + 1
-        statusbarStr = "Process: " & processCount & "/" & fileCount & "    " & file.Path
-        Application.statusbar = statusbarStr
-        
         ' Ignore excluded file
         If IsInArray(file.name, excludeArr) Then
             GoTo ContinueLoop
@@ -117,22 +126,32 @@ Function DoFolder(Folder)
         ' Operate on each file
         Dim fileExt As String
         fileExt = fso.GetExtensionName(file)
+        
         If fileExt = "xlsx" Or fileExt = "xls" Then
+            ' Update status bar
+            processCount = processCount + 1
+            statusbarStr = "Process: " & processCount & "/" & fileCount & "    " & file.Path
+            Application.statusbar = statusbarStr
+            
             Set wb = Workbooks.Open(file)
             For Each ws In ActiveWorkbook.Worksheets
-                statusbarStr = statusbarStr & "."
-                If cellChk = 1 Then
-                    Application.statusbar = statusbarStr
-                    Call CellSearch(file, ws, searchString)
-                End If
-                If commChk = 1 Then
-                    Application.statusbar = statusbarStr
-                    Call CommentSearch(file, ws, searchString)
-                End If
-                If shapeChk = 1 Then
-                    Application.statusbar = statusbarStr
-                    Call ShapeSearch(file, ws, searchString)
-                End If
+                For Each searchString In searchArr
+                    If Not Trim(searchString) = "" Then
+                        statusbarStr = statusbarStr & "."
+                        If cellChk = 1 Then
+                            Application.statusbar = statusbarStr
+                            Call CellSearch(file, ws, searchString)
+                        End If
+                        If commChk = 1 Then
+                            Application.statusbar = statusbarStr
+                            Call CommentSearch(file, ws, searchString)
+                        End If
+                        If shapeChk = 1 Then
+                            Application.statusbar = statusbarStr
+                            Call ShapeSearch(file, ws, searchString)
+                        End If
+                    End If
+                Next
             Next
             wb.Close savechanges:=False
         End If
@@ -140,7 +159,26 @@ ContinueLoop:
     Next
 End Function
 
+Function InitSearchArray()
+    For i = 1 To 10
+        searchArr(i) = Trim(Range("C" & i + 10).value)
+    Next
+    
+    Dim IsValid As Boolean
+    IsValid = False
+    
+    For i = 1 To 10
+        If Not Trim(searchArr(i)) = "" Then
+            IsValid = True
+        End If
+    Next
+    
+    InitSearchArray = IsValid
+    
+End Function
+
 Function CountFiles(Folder)
+    Set fso = CreateObject("Scripting.FileSystemObject")
     
     Dim SubFolder
     For Each SubFolder In Folder.SubFolders
@@ -148,7 +186,11 @@ Function CountFiles(Folder)
     Next
     Dim file
     For Each file In Folder.Files
-        fileCount = fileCount + 1
+        Dim fileExt As String
+        fileExt = fso.GetExtensionName(file)
+        If fileExt = "xlsx" Or fileExt = "xls" Then
+            fileCount = fileCount + 1
+        End If
     Next
 End Function
 
@@ -162,7 +204,7 @@ Function CellSearch(file, Worksheet, searchString)
         LookAt:=xlPart, _
         SearchOrder:=xlByRows, _
         SearchDirection:=xlNext, _
-        MatchCase:=False, _
+        MatchCase:=isCaseSensitive, _
         SearchFormat:=False)
     If Not cl Is Nothing Then
         ' if found, remember location
@@ -187,6 +229,12 @@ Function ShapeSearch(file, Worksheet, searchString)
             On Error Resume Next
             shapeStr = shape.TextFrame.Characters.Text
             On Error GoTo 0
+            
+            If Not isCaseSensitive Then
+                shapeStr = LCase(shapeStr)
+                searchString = LCase(searchString)
+            End If
+            
             If Not InStr(shapeStr, searchString) = 0 Then
                 resultCell = resultCell + 1
                 Call WriteResult(resultCell, ColNumToLetter(shape.TopLeftCell.Column) & shape.TopLeftCell.Row, shapeStr, Worksheet.name, file.Path)
@@ -204,6 +252,11 @@ Function CommentSearch(file, Worksheet, searchString)
         On Error Resume Next
         commentStr = comment.Text
         On Error GoTo 0
+            
+        If Not isCaseSensitive Then
+            commentStr = LCase(commentStr)
+            searchString = LCase(searchString)
+        End If
         
         If Not InStr(commentStr, searchString) = 0 Then
             resultCell = resultCell + 1
@@ -219,10 +272,11 @@ Function WriteResult(loc, resCell, resValue, resSheet, resBook)
     Dim wsr As Worksheet
     Set wsr = ThisWorkbook.Sheets(2)
     wsr.Activate
-    wsr.Range("B" & loc).value = resCell
-    wsr.Range("C" & loc).value = resValue
-    wsr.Range("D" & loc).value = resSheet
-    ActiveSheet.Hyperlinks.Add Anchor:=Range("E" & loc), Address:="file:///" & resBook, SubAddress:="'" & resSheet & "'" & "!" & resCell, TextToDisplay:=resBook
+    wsr.Range("B" & loc).value = resultCount
+    wsr.Range("C" & loc).value = resCell
+    wsr.Range("D" & loc).value = resValue
+    wsr.Range("E" & loc).value = resSheet
+    ActiveSheet.Hyperlinks.Add Anchor:=Range("F" & loc), Address:="file:///" & resBook, SubAddress:="'" & resSheet & "'" & "!" & resCell, TextToDisplay:=resBook
 End Function
 
 Function IsSheetExists()
@@ -247,6 +301,7 @@ Function CreateResultSheet()
     Dim wsr As Worksheet
     Set wsr = ThisWorkbook.Sheets(2)
     wsr.UsedRange.Delete
+    wsr.Range(headerNoCell).value = "No"
     wsr.Range(headerCellCell).value = "Cell"
     wsr.Range(headerValueCell).value = "Value"
     wsr.Range(headerSheetCell).value = "Sheet"
@@ -262,16 +317,20 @@ Function AddBorder()
     Dim wsr As Worksheet
     Set wsr = ThisWorkbook.Sheets(2)
     Set lastCell = wsr.UsedRange.Cells(wsr.UsedRange.Cells.Count)
+    
+    ' Add result border
     With wsr.Range(headerFirstCell, lastCell).Borders
         .LineStyle = xlContinuous
         .Weight = xlThin
         .ColorIndex = xlAutomatic
     End With
     
+    ' Align result TOP
+    wsr.Range(headerFirstCell, lastCell).VerticalAlignment = xlTop
+    
 End Function
 
 Function IsInArray(stringToBeFound As String, arr As Variant) As Boolean
   IsInArray = (UBound(Filter(arr, stringToBeFound)) > -1)
 End Function
-
 
